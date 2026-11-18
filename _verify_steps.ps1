@@ -1,5 +1,6 @@
 # 验证 num_inference_steps 参数真实生效：1步 vs 6步（仅诊断，不用于质量基准）
 $ErrorActionPreference = "Continue"
+. "$PSScriptRoot\_env_cache.ps1"
 $root  = "F:\Tsinglin_Voice"
 $exe   = "$root\Bin\audiocpp\audiocpp_cli.exe"
 $model = "$root\TTS\VoxCPM2\models_ms\VoxCPM2-GGUF\voxcpm2-q8_0.gguf"

@@ -1,6 +1,7 @@
 # VoxCPM2 低显存诊断：尝试 tile 解码 + 缩减 graph workspace
 # 硬约束：steps=6、seed=1234、不降精度（weight_type 保持 GGUF 原生 q8_0）
 $ErrorActionPreference = "Continue"
+. "$PSScriptRoot\_env_cache.ps1"
 $root  = "F:\Tsinglin_Voice"
 $exe   = "$root\Bin\audiocpp\audiocpp_cli.exe"
 $model = "$root\TTS\VoxCPM2\models_ms\VoxCPM2-GGUF\voxcpm2-q8_0.gguf"

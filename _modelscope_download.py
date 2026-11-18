@@ -8,6 +8,11 @@ DennisHuang648 的 BaseLM+Acoustic 双文件是 llama.cpp-omni 格式，audio.cp
 import os
 import sys
 import time
+
+# 严禁缓存写入 C 盘：ModelScope / HuggingFace 缓存统一到 F 盘
+os.environ["MODELSCOPE_CACHE"] = r"F:\Tsinglin_Voice\.cache\modelscope"
+os.environ["HF_HOME"] = r"F:\Tsinglin_Voice\.cache\huggingface"
+
 from modelscope.hub.snapshot_download import snapshot_download
 
 MODEL_ID = "audio-cpp/audio.cpp-gguf"

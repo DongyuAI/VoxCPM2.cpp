@@ -1,5 +1,6 @@
 # 精确测量 VoxCPM2 Q8_0 合成期间峰值显存（后台高频采样 nvidia-smi）
 $ErrorActionPreference = "Continue"
+. "$PSScriptRoot\_env_cache.ps1"
 $root  = "F:\Tsinglin_Voice"
 $exe   = "$root\Bin\audiocpp\audiocpp_cli.exe"
 $model = "$root\TTS\VoxCPM2\models_ms\VoxCPM2-GGUF\voxcpm2-q8_0.gguf"

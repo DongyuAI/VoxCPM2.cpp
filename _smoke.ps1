@@ -1,5 +1,6 @@
 # 快速冒烟测试：VoxCPM2 Q8_0 单文件GGUF 在 GTX1070 Pascal 上能否加载并合成
 $ErrorActionPreference = "Continue"
+. "$PSScriptRoot\_env_cache.ps1"
 $root  = "F:\Tsinglin_Voice"
 $exe   = "$root\Bin\audiocpp\audiocpp_cli.exe"
 $model = "$root\TTS\VoxCPM2\models_ms\VoxCPM2-GGUF\voxcpm2-q8_0.gguf"

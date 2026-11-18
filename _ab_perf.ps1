@@ -6,6 +6,7 @@
 #   B_packed   perf=cuda_perf  graph=off   (QKV/gate-up 融合 matmul，dtype 不变)
 #   C_packedgr perf=cuda_perf  graph=on    (Pascal CUDA Graph via GGML_CUDA_GRAPHS_PRE_AMPERE)
 $ErrorActionPreference = "Continue"
+. "$PSScriptRoot\_env_cache.ps1"
 $root  = "F:\Tsinglin_Voice"
 $exe   = "$root\Bin\audiocpp\audiocpp_cli.exe"
 $model = "$root\TTS\VoxCPM2\models_ms\VoxCPM2-GGUF\voxcpm2-q8_0.gguf"
