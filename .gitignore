@@ -1,0 +1,5 @@
+models/
+*.part*
+*.wav
+*.log
+run_*.log
