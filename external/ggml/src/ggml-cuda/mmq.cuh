@@ -140,6 +140,10 @@ static constexpr __device__ int get_mmq_x_max_device() {
 }
 
 static int get_mmq_y_host(const int cc) {
+    // [PASCAL-SMALL-M] Pascal MMQ tile rows 64 -> 32 for small-M efficiency.
+    // DiT transformer matmuls M=22; mmq_y=32 raises row utilization 34%->69%.
+    // SHA-safe: VDR=8 K accumulation order unchanged. sum[mmq_x*32/256]>=1 for mmq_x>=8.
+    if (GGML_CUDA_CC_IS_NVIDIA(cc) && ggml_cuda_highest_compiled_arch(cc) < GGML_CUDA_CC_VOLTA) return 32;
     return GGML_CUDA_CC_IS_AMD(cc) ? (GGML_CUDA_CC_IS_RDNA1(cc) ? 64 : 128) :
         ((GGML_CUDA_CC_IS_NVIDIA(cc) && ggml_cuda_highest_compiled_arch(cc) >= GGML_CUDA_CC_VOLTA) ? 128 : 64);
 }
@@ -164,7 +168,7 @@ static constexpr __device__ int get_mmq_y_device() {
 #if __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
     return 128;
 #else
-    return 64;
+    return 32; // [PASCAL-SMALL-M] mirror host
 #endif // __CUDA_ARCH__ >= GGML_CUDA_CC_VOLTA
 #endif // defined(GGML_USE_HIP)
 }
