@@ -5,9 +5,9 @@
 
 $ErrorActionPreference = "Continue"
 $root = "F:\Tsinglin_Voice\TTS\VoxCPM.cpp"
-$binDir = "$root\build-cuda3\bin"   # 两个构建共用同一套 DLL
-
-# A/B 两个可执行文件
+# A/B 两个可执行文件（每个用自己构建目录的 DLL，避免加载到错误的 ggml-cuda.dll）
+$binOff = "$root\build-cuda3\bin"
+$binOn  = "$root\build-cudagraph\bin"
 $exeOff = "$root\build-cuda3\examples\voxcpm_tts.exe"      # 原版（GGML_CUDA_GRAPHS=OFF）
 $exeOn  = "$root\build-cudagraph\examples\voxcpm_tts.exe"  # graph 版（PATCH + ON）
 
@@ -17,12 +17,13 @@ $promptT = "对，这就是我，万人敬仰的太乙真人。"
 $text    = "大家好，我现在正在大可奇奇体验AI科技。"
 $steps   = "6"   # 质量底线，锁定；两边完全一致
 
-$env:PATH = "$binDir;" + $env:PATH
 $env:VOXCPM_LOG_DECODE_TIMING = "1"
 
-function Run-One($label, $exe) {
+function Run-One($label, $exe, $bin) {
     Write-Output "`n########## $label ##########"
     if (-not (Test-Path $exe)) { Write-Output "SKIP: 找不到 $exe"; return }
+    # 把本构建的 bin 放到 PATH 最前，确保加载自己的 ggml-cuda.dll
+    $env:PATH = "$bin;" + $env:PATH
     $out = "$root\ab_${label}_ts$steps.wav"
     & $exe `
         --model-path $model `
@@ -37,6 +38,6 @@ function Run-One($label, $exe) {
     Write-Output "---- $label exit=$LASTEXITCODE  out=$out ----"
 }
 
-Run-One "graphOFF" $exeOff
-Run-One "graphON"  $exeOn
+Run-One "graphOFF" $exeOff $binOff
+Run-One "graphON"  $exeOn  $binOn
 Write-Output "`n完成。对比两份 ab_graph*_ts6.wav 的 RTF 与 decode it/s；音频内容应完全一致（同一模型/同一 6 步）。"
