@@ -1,0 +1,21 @@
+ggml_cuda_init: found 1 CUDA devices (Total VRAM: 8191 MiB):
+  Device 0: NVIDIA GeForce GTX 1070, compute capability 6.1, VMM: yes, VRAM: 8191 MiB
+[DIT-NODE-HIST] op=ADD                      count=32
+[DIT-NODE-HIST] op=MUL                      count=37
+[DIT-NODE-HIST] op=CONCAT                   count=363
+[DIT-NODE-HIST] op=RMS_NORM                 count=25
+[DIT-NODE-HIST] op=MUL_MAT                  count=115
+[DIT-NODE-HIST] op=SCALE                    count=12
+[DIT-NODE-HIST] op=CONT                     count=28
+[DIT-NODE-HIST] op=RESHAPE                  count=231
+[DIT-NODE-HIST] op=VIEW                     count=49
+[DIT-NODE-HIST] op=PERMUTE                  count=87
+[DIT-NODE-HIST] op=SOFT_MAX                 count=12
+[DIT-NODE-HIST] op=ROPE                     count=24
+[DIT-NODE-HIST] op=UNARY                    count=14
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
