@@ -1,0 +1,8 @@
+build/
+configure*.log
+build*.log
+*.obj
+*.pdb
+*.exe
+*.dll
+.cache/
