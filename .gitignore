@@ -39,3 +39,4 @@ web/.artifacts/
 *.wav
 *.log
 *.bak
+_voices/
