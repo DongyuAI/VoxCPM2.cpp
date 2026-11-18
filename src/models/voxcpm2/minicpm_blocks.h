@@ -14,6 +14,7 @@
 #include <ggml.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <cstddef>
 #include <memory>
 #include <stdexcept>
@@ -55,6 +56,30 @@ repeat_kv_heads(engine::core::ModuleBuildContext &ctx,
   if (repeats == 1) {
     return input;
   }
+
+  // [PASCAL-GQA-REPEAT] Replace N-1 binary Slice+Concat nodes with one repeat.
+  // Byte layout is proven byte-identical to the original concat chain:
+  //   for each kv head h, output heads [h,h,h,h] contiguous (R copies).
+  // ggml ne is reverse of logical dims {B,H,S,D} -> ne {D,S,H,B}:
+  //   cont -> reshape {D*S,1,H,B} -> repeat ne1 (1->R) -> reshape {D,S,H*R,B}
+  // makes head index j map to source head j/R => [h0,h0,h0,h0,h1,...],
+  // exactly the original byte order. Env-gated for A/B, default ON.
+  static const bool use_repeat =
+      std::getenv("VOXCPM2_GQA_CONCAT") == nullptr;
+  if (use_repeat && input.shape.rank == 4) {
+    ggml_tensor * t = input.tensor;
+    const int64_t D = t->ne[0], S = t->ne[1], H = t->ne[2], B = t->ne[3];
+    if (t->type == GGML_TYPE_F32 && H > 0 && B > 0 && (S * D) > 0) {
+      ggml_tensor * c = ggml_cont(ctx.ggml, t);
+      ggml_tensor * r = ggml_reshape_4d(ctx.ggml, c, D * S, 1, H, B);
+      ggml_tensor * p = ggml_repeat_4d(ctx.ggml, r, D * S, repeats, H, B);
+      ggml_tensor * o = ggml_reshape_4d(ctx.ggml, p, D, S, H * repeats, B);
+      auto out_shape = input.shape;
+      out_shape.dims[1] *= repeats;
+      return engine::core::wrap_tensor(o, out_shape, input.type);
+    }
+  }
+
   std::vector<engine::core::TensorValue> heads;
   heads.reserve(static_cast<size_t>(input.shape.dims[1] * repeats));
   for (int64_t head = 0; head < input.shape.dims[1]; ++head) {
