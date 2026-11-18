@@ -1,0 +1,8 @@
+models/
+models_ms/
+*.gguf
+*.gguf.incomplete
+*.part*
+*.wav
+*.log
+run_*.log

@@ -1,0 +1,7 @@
+{
+        "hidden_dim": 1024,
+        "ffn_dim": 4096,
+        "num_heads": 16,
+        "num_layers": 12,
+        "kv_channels": 128
+    }
