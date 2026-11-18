@@ -20,6 +20,6 @@ $env:INCLUDE = "$vc\include;$sdk\Include\$sdkver\um;$sdk\Include\$sdkver\ucrt;$s
 $env:LIB = "$vc\lib\x64;$sdk\Lib\$sdkver\um\x64;$sdk\Lib\$sdkver\ucrt\x64;$env:CUDA_PATH\lib\x64"
 
 $BUILD = "build\windows-cuda-release"
-Write-Output "=== BUILD audiocpp_cli -j1 (nvcc 并行死锁后串行补编) ==="
-& "$cmakeBin\cmake.exe" --build $BUILD --target audiocpp_cli -j 1 2>&1 | Tee-Object -FilePath "$root\build_profile.log"
+Write-Output "=== BUILD audiocpp_cli -j6 (用户指定) ==="
+& "$cmakeBin\cmake.exe" --build $BUILD --target audiocpp_cli -j 6 2>&1 | Tee-Object -FilePath "$root\build_dp4a.log"
 Write-Output "BUILD_EXIT=$LASTEXITCODE"
