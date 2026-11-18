@@ -103,7 +103,7 @@ def download_file(name, size):
         print(f"[FAIL] {name}: {len(failed)} chunks failed: {failed[:2]}", flush=True)
         return False
 
-    # 合并
+    # 合并（不删除分片——批量删除会触发安全策略拦截；分片由外部按需清理）
     print(f"[MERGE] {name} ...", flush=True)
     with open(path, "wb") as out:
         for i in range(n_chunks):
@@ -114,7 +114,6 @@ def download_file(name, size):
                     if not buf:
                         break
                     out.write(buf)
-            os.remove(part)
     ok = os.path.getsize(path) == size
     print(f"[{'OK' if ok else 'FAIL'}] {name}: {os.path.getsize(path)}/{size}", flush=True)
     return ok
