@@ -6,7 +6,8 @@ project(voxcpm
     LANGUAGES CXX C
 )
 
-set(CMAKE_CXX_STANDARD 17)
+# VoxCPM sources use C++20 designated initializers (MSVC requires /std:c++20)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -15,10 +16,22 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Compiler flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
-set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+# Compiler flags (MSVC-compatible: GCC-style warning/optim flags only for non-MSVC)
+if(MSVC)
+    # MSVC uses /W3 /O2 by default; no GCC-style flags.
+    # Limit MSVC-only options to C/CXX so nvcc does not receive them.
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:C>:/utf-8>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/bigobj>"
+    )
+    # MSVC <cmath> hides M_PI/M_PI_2 unless _USE_MATH_DEFINES is set
+    add_compile_definitions(_USE_MATH_DEFINES)
+else()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra")
+    set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+endif()
 
 find_package(Threads REQUIRED)
 

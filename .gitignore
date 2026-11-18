@@ -34,3 +34,8 @@ dist/
 web/playground/dist/
 web/packages/*/dist/
 web/.artifacts/
+
+# 本地实验产物：音频/日志/备份（不纳入版本控制）
+*.wav
+*.log
+*.bak
