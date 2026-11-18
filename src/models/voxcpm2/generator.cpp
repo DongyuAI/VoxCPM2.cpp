@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -41,6 +42,21 @@ namespace {
 namespace binding = engine::modules::binding;
 
 using Clock = std::chrono::steady_clock;
+
+// [DIT-PROFILE] 累加式计时：定位 DiT estimator 每次 forward 的耗时构成。
+// 仅在 VOXCPM2_DIT_PROFILE=1 时输出，默认关闭对数值零影响。
+struct DiTProfileAccum {
+    double upload_ms = 0.0;
+    double compute_ms = 0.0;
+    double sync_ms = 0.0;
+    double readback_ms = 0.0;
+    long long calls = 0;
+};
+static DiTProfileAccum g_dit_prof;
+inline bool dit_profile_enabled() {
+    static const bool enabled = std::getenv("VOXCPM2_DIT_PROFILE") != nullptr;
+    return enabled;
+}
 
 constexpr int32_t kRefAudioStartToken = 103;
 constexpr int32_t kRefAudioEndToken = 104;
@@ -765,6 +781,8 @@ public:
       throw std::runtime_error(
           "VoxCPM2 DiT estimator delta-time embedding size mismatch");
     }
+    const bool prof = dit_profile_enabled();
+    const auto t_upload0 = prof ? Clock::now() : Clock::now();
     ggml_backend_tensor_set(x_, x.data(), 0, x.size() * sizeof(float));
     ggml_backend_tensor_set(cond_, cond.data(), 0, cond.size() * sizeof(float));
     ggml_backend_tensor_set(mu_, mu.data(), 0, mu.size() * sizeof(float));
@@ -772,16 +790,26 @@ public:
                             time_embedding.size() * sizeof(float));
     ggml_backend_tensor_set(delta_time_embedding_, delta_time_embedding.data(),
                             0, delta_time_embedding.size() * sizeof(float));
+    const auto t_compute0 = Clock::now();
+    if (prof) g_dit_prof.upload_ms += engine::debug::elapsed_ms(t_upload0, t_compute0);
     engine::core::set_backend_threads(weights_->backend(), weights_->threads());
     const ggml_status status =
         engine::core::compute_backend_graph(weights_->backend(), graph_);
+    const auto t_sync0 = Clock::now();
+    if (prof) g_dit_prof.compute_ms += engine::debug::elapsed_ms(t_compute0, t_sync0);
     ggml_backend_synchronize(weights_->backend());
+    const auto t_read0 = Clock::now();
+    if (prof) g_dit_prof.sync_ms += engine::debug::elapsed_ms(t_sync0, t_read0);
     if (status != GGML_STATUS_SUCCESS) {
       throw std::runtime_error("VoxCPM2 DiT estimator graph compute failed");
     }
     std::vector<float> output(static_cast<size_t>(patch_elems), 0.0F);
     ggml_backend_tensor_get(output_, output.data(), 0,
                             output.size() * sizeof(float));
+    if (prof) {
+      g_dit_prof.readback_ms += engine::debug::elapsed_ms(t_read0, Clock::now());
+      ++g_dit_prof.calls;
+    }
     return output;
   }
 
@@ -1129,6 +1157,14 @@ public:
       if (step < static_cast<int64_t>(t_span.size()) - 1) {
         dt = t - t_span[static_cast<size_t>(step + 1)];
       }
+    }
+    if (dit_profile_enabled() && g_dit_prof.calls > 0) {
+      debug::timing_log_scalar("voxcpm2.dit.upload_ms", g_dit_prof.upload_ms);
+      debug::timing_log_scalar("voxcpm2.dit.compute_ms", g_dit_prof.compute_ms);
+      debug::timing_log_scalar("voxcpm2.dit.sync_ms", g_dit_prof.sync_ms);
+      debug::timing_log_scalar("voxcpm2.dit.readback_ms", g_dit_prof.readback_ms);
+      debug::timing_log_scalar("voxcpm2.dit.calls", g_dit_prof.calls);
+      g_dit_prof = DiTProfileAccum{};
     }
     return channel_major_to_patch_major(x);
   }
