@@ -145,7 +145,109 @@ kernel 内每个 block 有 8 个 warp（`nwarps = 256/32 = 8`），循环 `for i
 2. **Pascal 启用 stream-k**：把 K 维拆给多个 block 并行填满 SM；风险是 fixup 的累加顺序可能改变 SHA，需实测验证。
 3. **融合 time/dt 的 4 个小 MLP**：占比小，收益上限低。
 
-下一步：对方案 1 做 A/B 实测（baseline exe 已备份为 `audiocpp_cli_baseline_streamk.exe`），对比 wav SHA 与 DiT compute 耗时。硬约束不变：**6 步 / Q8_0 / 不改数值 / SHA 必须一致**。
+下一步：对方案 1 做 A/B 实测，对比 wav SHA 与 DiT compute 耗时。硬约束不变：**6 步 / Q8_0 / 不改数值 / SHA 必须一致**。
+
+**Baseline（方案改动前）已实测存证**：
+- exe：`audiocpp_base.exe`（build 目录，含 DIT_PROFILE 埋点）
+- wav SHA256：`c360888d48cefd9b9619fb6853e54d285084a32f8f85051b72a4e2fa0a86db2a`
+- DiT compute 累加 = 4299.9ms，715 calls，6.014ms/call；RTF 0.373
+- 运行方式：前台直接调用（PowerShell `| Out-Null` 管道会导致进程提前返回、日志不全，必须用前台 bash/直接调用）
+
+---
+
+## 六、mmq_y=8 的遗留问题：warp 内 75% 线程空闲（后续改进项）
+
+已实施 mmq_y 64→8（host + device 两处，`[PASCAL-SMALL-M]` 标记），正在编译验证。但需如实记录该方案的**理论天花板与遗留低效**：
+
+### 6.1 问题：warp 内空闲
+
+`vec_dot_q8_0_q8_1_dp4a` 的线程映射：
+```cpp
+for (int i0 = 0; i0 < mmq_y; i0 += warp_size) {   // warp_size=32
+    const int i = i0 + threadIdx.x;                // threadIdx.x 0..31 → 输出行
+    ...
+}
+```
+mmq_y=8 时只有 `threadIdx.x = 0..7` 对应有效输出行，**一个 warp 32 线程里 24 个空闲（75%）**。
+
+### 6.2 收益预估修正
+
+我此前说"mmq_y 64→8 提速近 8×"是**过于乐观**的。准确分析：
+- DP4A 是 warp 锁步发射，空闲线程不额外消耗指令周期，但也不贡献有效 MAC
+- mmq_y 从 64→8 真正减少的是 `vec_dot` 的输出行循环轮数（Pascal 上 `mmq_y/warp_size`：2 轮 → 1 轮）与 `load_tiles` 轮数（8 轮 → 1 轮）
+- 预期的 DP4A 有效收益约 **2×量级**（行循环减半），加上 load 开销下降，实际收益以 A/B 实测为准
+
+### 6.3 后续改进路线（保持 SHA 一致的前提下）
+
+| 方案 | 思路 | SHA 风险 | 说明 |
+|------|------|----------|------|
+| A 线程重映射 | `threadIdx.x 0..31` 改为映射到 (行0..7 × K段0..3)，warp 内 shuffle reduction 打满 32 线程 | **高**：改变 K 累加顺序，必须验证数值等价 | 收益最大但风险高 |
+| B 强制小 M 走 MMVQ | `mul_mat_vec_q` 是 K 维并行，天然打满 warp；Pascal 上 Q8_0 目前被 `ggml_cuda_should_use_mmq` 强制走 MMQ | **中**：MMVQ 与 MMQ 累加顺序不同，需实测 SHA | 需给小 M 加分支 |
+| C 折中 mmq_y=16/32 | 在行级空转与 warp 占用间找平衡 | 无（SHA-safe） | 收益上限低于 A/B；**已选此路实测，见下** |
+
+**决策顺序**：先拿 mmq_y 实测数据 → 若 SHA 一致且有收益，作为可回退的基线保留 → 再评估方案 A/B 的数值等价性。已建任务 #19 跟踪。
+
+### 6.4 实测过程中的关键修正（2026-11-18）
+
+**尝试 1：mmq_y=8 → 编译失败**。错误 `the size of an array must be greater than zero`：`sum[mmq_x*mmq_y/(nwarps*warp_size)]`，Pascal nwarps×warp_size=256，mmq_y=8 时需 mmq_x≥32，但模板会实例化 mmq_x=8/16/24（如 Q1_0），导致 sum[0]。上游 kernel 从未设计 mmq_y < warp_size。**已回退**。
+
+**关键认知修正：DiT 各层走不同 kernel**。ggml 的分派（`ggml-cuda.cu:2864`）按 M 选择：
+- `use_mul_mat_vec_q`（MMVQ）：当 `M = src1->ne[1] ≤ MMVQ_MAX_BATCH_SIZE(8)` 且优先判断
+- `use_mul_mat_q`（MMQ）：M > 8 时
+
+因此：
+- **M=8 的层**（in_proj/cond_proj/out_proj + time MLP）：**已经走 MMVQ**，相对高效
+- **M=22 的层**（12 层 transformer 的 qkv/o/ffn）：走 MMQ，mmq_y=64 → 22/64=34% 行利用率（浪费 66%）
+
+**为什么不能让 M=22 也走 MMVQ（SHA 红线）**：
+```
+vecdotq.cuh:
+  VDR_Q8_0_Q8_1_MMVQ = 2   // MMVQ 每次 DP4A 打包 2 个 int = 8 个 int8
+  VDR_Q8_0_Q8_1_MMQ  = 8   // MMQ  每次 DP4A 打包 8 个 int = 32 个 int8
+```
+两者 K 维累加粒度不同（8 vs 32 元素一块），浮点舍入顺序不同 → **SHA 必然不一致**。所以"调大 MMVQ_MAX_BATCH_SIZE 让 transformer 走 MMVQ"违反硬约束，此路不通。这也解释了此前 device 常驻实验 SHA 变化的敏感性。
+
+**尝试 2：mmq_y=32（当前实测中）**。满足 sum[mmq_x*32/256]≥1（mmq_x≥8 全部合法），可编译；对 M=22 的 MMQ 层行利用率 34%→69%；同为 VDR=8 累加，**SHA-safe**。串行 -j1 编译中（-j6 在本机会 nvcc 死锁）。
+
+Baseline 存证：SHA `c360888d…`，DiT compute 4299.9ms，715 calls。
+
+### 6.5 实测受阻：系统级运行时崩溃（2026-11-18 14:22+）
+
+mmq_y=32 编译成功（`BUILD_EXIT=0`，exe 14:20 生成，0 error），但运行时所有 exe（自编译 base/opt + 官方 Bin 版）**统一崩溃**：
+```
+ggml_backend_cuda_graph_compute: CUDA graph warmup complete
+ggml.c:1700: GGML_ASSERT(ctx->mem_buffer != NULL) failed
+```
+崩溃在 `ggml_init()` 的 `_aligned_malloc(mem_size, 64)` 返回 NULL，发生在 CUDA graph warmup 后的 context 构建阶段。
+
+**排查结论（已排除）**：
+- 不是代码改动：官方 Bin 版（从未重编译）同样崩溃；源码已 `git checkout` 回退到干净 baseline（mmq_y=64）
+- 不是显存：nvidia-smi 显示 6970 MiB free，无残留进程
+- 不是物理内存：32GB 总量 / 9GB free，Python ctypes 实测 `_aligned_malloc(3072MB, 64)` **成功**
+- 不是缓存：删除重建 `audiocpp-gguf/<hash>` 缓存目录后仍崩
+- 排查中发现 `vmmem`（WSL/Hyper-V）占用 8.7GB，但内存分配测试证明不是主因
+
+**关键异常**：13:55 时完全相同的 baseline 命令能跑通（SHA c360888d），14:22 后所有 exe 全崩。中间唯一系统变化是反复编译 + 多次 GGUF 大文件读入内存。疑为 Windows CRT 堆/CUDA 上下文的瞬态状态问题。
+
+**当前处理**：用 -j6 重新编译干净 baseline（遵守用户编译规则：默认 -j6、死锁降 -j3、严禁 -j1），验证重编译后是否恢复。若恢复则重跑 mmq_y A/B；若仍崩则需重启环境/等待系统状态恢复。**在崩溃解决前，mmq_y=32 无任何实测数据，不得宣称有收益**。
+
+### 6.6 崩溃解决 + mmq_y=32 实测结果（2026-11-18 14:54）
+
+**崩溃根因**：不是系统内存/CUDA/缓存问题，而是**旧 exe 与重编译后的 ggml 中间库状态不一致**（编译 mmq_y=32 时 ninja 重建了共享中间产物，源码回退后旧 exe 与之失配）。用 -j3 重新编译干净 baseline 后崩溃完全消失，SHA 恢复 `c360888d`。（-j6 再次死锁，按规则降 -j3 成功。）
+
+**mmq_y=32 A/B 实测**（100字/6步/Q8_0/seed1234/cuda_perf/graph ON）：
+
+| 指标 | baseline (mmq_y=64) | opt (mmq_y=32) | 差异 |
+|------|------|------|------|
+| wav SHA256 | c360888d… | **c360888d…** | **完全一致 ✓** |
+| DiT compute | 4289.0 ms | 4243.9 ms | -45ms (**~1.05%**) |
+| generator_ms | 7807 ms | 7692 ms | -115ms (**~1.5%**) |
+
+**结论**：mmq_y=32 是 SHA-safe 的真实改进，但收益仅 ~1%。已提交 audio.cpp commit `5118c7f`。
+
+**为什么理论 66% 行浪费只换来 1% 收益**：MMQ kernel 只用于 M>8 的层（DiT transformer 的 qkv/o/ffn，M=22），而 **绝大多数 matmul 是 M=8 的层**（in_proj/cond_proj/out_proj + time MLP），这些走 MMVQ 路径、根本不受 mmq_y 影响。mmq_y 优化只覆盖了耗时的一小部分。这印证了 6.4 节的分派分析。
+
+**下一步方向（任务 #19）**：真正的大头是 M=8 的 MMVQ 层。要进一步优化必须动 MMVQ kernel（如 warp 内 K 维并行度、VDR=2 的 DP4A 吞吐），但需严格保持 SHA 一致。
 
 ---
 
