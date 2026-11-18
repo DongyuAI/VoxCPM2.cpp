@@ -111,3 +111,33 @@ F:/Tsinglin_Voice/TTS/VoxCPM.cpp/
 4. Pascal 上 graph capture/replay 本身有额外开销。
 
 > 注意：默认 baseline（build-cuda3，graph OFF）才是正式可用版本。build-cudagraph 仅作实验记录。
+
+---
+
+## 附录：提速路径二 —— 参考音频 latent 预编码缓存（结论：有效，采用）
+
+**原理**：CLI 的 `voxcpm_tts.exe` 每轮都现场跑 `extract_prompt_features`（AudioVAE encode，固定 ~0.9s）。server 模式用 `VoiceStore`：注册音色时把 `prompt_feat` 编码一次存成 `prompt_feat.bin`，合成时直接读缓存，不重复 encode。**完全无损**（同一份 prompt_feat）。
+
+**实测（都 q8_0 / 6 步 / 同一段文本）**：
+| 模式 | 端到端 wall | AudioVAE encode |
+|---|---|---|
+| CLI 现场编码（3 次） | 4.43 / 4.96 / 4.43 s | 0.947 / 0.889 / 0.901 s |
+| Server 缓存音色（3 次） | 2.08 / 2.28 / 2.44 s | 0（读缓存） |
+
+**收益**：端到端快约 **1 倍**，省掉每轮 ~0.9s 的固定 encode 开销。
+
+**正确用法**：
+```
+# 1) 启动 server（质量底线：--inference-timesteps 6）
+voxcpm-server.exe --model-path <q8_0.gguf> --model-name voxcpm --voice-dir <dir> \
+   --backend cuda --inference-timesteps 6 --disable-auth --port 8080
+
+# 2) 注册音色（一次性 encode，落盘 prompt_feat.bin）
+curl -X POST localhost:8080/v1/voices -F id=taiyi -F text="参考音频原文" -F audio=@ref.wav
+
+# 3) 之后每次合成直接复用缓存
+curl -X POST localhost:8080/v1/audio/speech -H 'Content-Type: application/json' \
+   -d '{"model":"voxcpm","input":"要合成的文本","voice":"taiyi","response_format":"wav"}'
+```
+
+> 这就是长文强调的"不要每轮重算参考编码"。客服固定品牌音色场景下，注册一次、长期复用。
