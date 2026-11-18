@@ -29,6 +29,6 @@ Write-Output "=== FRESH configure CUDA sm_61 + CUDA GRAPHS ($BUILD) ==="
 Write-Output "CONFIGURE_EXIT=$LASTEXITCODE"
 if ($LASTEXITCODE -ne 0) { exit 2 }
 
-Write-Output "=== build -j1 (reuse compiled objects) ==="
-& "$cmakeBin\cmake.exe" --build $BUILD -j 1 2>&1 | Tee-Object -FilePath "F:\Tsinglin_Voice\TTS\VoxCPM.cpp\build_graph.log"
+Write-Output "=== build -j3 (reuse compiled objects) ==="
+& "$cmakeBin\cmake.exe" --build $BUILD -j 3 2>&1 | Tee-Object -FilePath "F:\Tsinglin_Voice\TTS\VoxCPM.cpp\build_graph.log"
 Write-Output "BUILD_EXIT=$LASTEXITCODE"
