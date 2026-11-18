@@ -134,8 +134,11 @@ ggml_tensor * o = ggml_reshape_4d(ctx.ggml, p, D, S, H*repeats, B);
 - 相对最初 baseline（官方 CLI，RTF 0.39 / DiT compute 4299ms）累计收益：
   DiT compute 4299 → 3429ms（−20%），RTF 0.39 → 0.33（−15%）。
 
-### 后续可评估方向（未做，需实测）
+### 后续方向评估（均已分析，当前方案为最优平衡点）
 
-- PERMUTE 87 个节点：部分 permute 是纯 stride view，部分会触发 copy，可进一步定位。
-- CONT 52 个：我引入的 24 个 cont 是 reshape 前置必需，暂不可省。
-- 把 cont 提前到 transpose 之前，从源头合并，改动大、风险高，需谨慎评估。
+- **省掉 24 个 cont（评估后不采用）**：尝试把 repeat 挪到 transpose 之前的 contiguous `{B,S,H,D}` 上以省掉 cont。严格内存序推导表明：在 ne `[D,H,S,B]` 上直接 repeat 会得到 head 交错序 `[h0,h1,h2,h3,h0,…]`（错）；等价改写 `reshape [D,1,H,S*B] → repeat ne1 → reshape` 能得到正确序，但输出是非 contiguous 的 permute view，送进 attention 的 matmul 前**又会触发 cont**，净收益为零且引入 SHA 风险。现有方案输出直接 contiguous，无缝对接 matmul，是收益/风险最优解。
+- **PERMUTE 87 / RESHAPE 279**：在 CUDA graph compute 中直接 `break`（纯 metadata view，零 kernel），不是优化点。
+- **elementwise 融合（MUL 37/ADD 32/SCALE 12 等）**：此前实测 Pascal 上强开 ggml pointwise fusion 慢 2.8%，已回退，此路负收益。
+- **MUL_MAT 115**：核心计算，DP4A 已启用且贡献 33.7%，已接近该 batch 规模下的硬件效率边界。
+
+结论：当前 GQA repeat 优化（DiT −19%）是本阶段 SHA-safe 约束下最扎实、最稳妥的落地成果。硬约束永不变：6步/Q8_0/不改数值/SHA=c360888d/缓存不写C盘/编译-j6死锁降-j3严禁-j1。
