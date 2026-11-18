@@ -2855,6 +2855,20 @@ static void ggml_cuda_mul_mat(ggml_backend_cuda_context & ctx, const ggml_tensor
     bool use_batched_cublas_bf16 = src0->type == GGML_TYPE_BF16 && bf16_mma_hardware_available(cc);
     bool use_batched_cublas_f32  = src0->type == GGML_TYPE_F32;
 
+    // [MATMUL-SHAPE-PROBE] env-gated one-shot log of each distinct matmul shape/kernel
+    if (getenv("GGML_CUDA_LOG_MATMUL") != nullptr && ggml_is_quantized(src0->type)) {
+        static bool logged[3][65] = {};
+        const int kind = use_mul_mat_vec_q ? 0 : (use_mul_mat_q ? 1 : 2);
+        const int m    = std::min<int>(64, std::max<int>(1, (int) src1->ne[1]));
+        if (!logged[kind][m]) {
+            logged[kind][m] = true;
+            fprintf(stderr, "[MATMUL-SHAPE-PROBE] kind=%d(%s) M=%lld N=%lld K=%lld ne23=%lld,%lld type=%s\n",
+                    kind, kind == 0 ? "MMVQ" : (kind == 1 ? "MMQ" : "OTHER"),
+                    (long long) src1->ne[1], (long long) dst->ne[0], (long long) src1->ne[0],
+                    (long long) src1->ne[2], (long long) src1->ne[3], ggml_type_name(src0->type));
+        }
+    }
+
     if (!split && use_mul_mat_vec_f) {
         // the custom F16 vector kernel can be used over batched cuBLAS GEMM
         // but this is only faster for GPUs without tensor cores or with a thin src0 matrix (particularly KQV in attention)

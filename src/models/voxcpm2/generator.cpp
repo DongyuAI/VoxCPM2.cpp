@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -51,6 +52,7 @@ struct DiTProfileAccum {
     double sync_ms = 0.0;
     double readback_ms = 0.0;
     long long calls = 0;
+    int graph_nodes = -1;
 };
 static DiTProfileAccum g_dit_prof;
 inline bool dit_profile_enabled() {
@@ -977,6 +979,19 @@ private:
       throw std::runtime_error(
           "failed to allocate VoxCPM2 DiT estimator graph");
     }
+    if (dit_profile_enabled()) {
+      g_dit_prof.graph_nodes = ggml_graph_n_nodes(graph_);
+      int hist[GGML_OP_COUNT] = {};
+      for (int i = 0; i < g_dit_prof.graph_nodes; ++i) {
+        hist[(int) ggml_graph_node(graph_, i)->op]++;
+      }
+      for (int op = 0; op < GGML_OP_COUNT; ++op) {
+        if (hist[op] > 0) {
+          fprintf(stderr, "[DIT-NODE-HIST] op=%-24s count=%d\n",
+                  ggml_op_name((enum ggml_op) op), hist[op]);
+        }
+      }
+    }
     std::vector<int32_t> positions_data(
         static_cast<size_t>(2 + 1 + root_config.patch_size * 2), 0);
     for (int64_t i = 0; i < static_cast<int64_t>(positions_data.size()); ++i) {
@@ -1164,6 +1179,7 @@ public:
       debug::timing_log_scalar("voxcpm2.dit.sync_ms", g_dit_prof.sync_ms);
       debug::timing_log_scalar("voxcpm2.dit.readback_ms", g_dit_prof.readback_ms);
       debug::timing_log_scalar("voxcpm2.dit.calls", g_dit_prof.calls);
+      debug::timing_log_scalar("voxcpm2.dit.graph_nodes", g_dit_prof.graph_nodes);
       g_dit_prof = DiTProfileAccum{};
     }
     return channel_major_to_patch_major(x);
