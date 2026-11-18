@@ -19,8 +19,11 @@ function Trial($name, [string[]]$opts) {
         --num-inference-steps 6 --metrics --log-file $log `
         --session-option "perf_mode=cuda_perf" @opts 2>&1
     $sw.Stop()
-    $rtf = ($m | Select-String -Pattern "metrics.rtf=([0-9.]+)").Matches.Groups[1].Value
-    $wall = ($m | Select-String -Pattern "metrics.wall_ms=([0-9.]+)").Matches.Groups[1].Value
+    $all = ($m | Out-String)
+    $rtfM = [regex]::Match($all, "metrics\.rtf=([0-9.]+)")
+    $wallM = [regex]::Match($all, "metrics\.wall_ms=([0-9.]+)")
+    $rtf = if ($rtfM.Success) { $rtfM.Groups[1].Value } else { "?" }
+    $wall = if ($wallM.Success) { $wallM.Groups[1].Value } else { "?" }
     $sha = if (Test-Path $out) { (Get-FileHash $out -Algorithm SHA256).Hash.Substring(0,16) } else { "NONE" }
     Write-Output ("{0,-22} wall={1,9}ms  RTF={2,-9} sha={3}" -f $name, $wall, $rtf, $sha)
 }
