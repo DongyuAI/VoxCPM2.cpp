@@ -141,3 +141,25 @@ curl -X POST localhost:8080/v1/audio/speech -H 'Content-Type: application/json' 
 ```
 
 > 这就是长文强调的"不要每轮重算参考编码"。客服固定品牌音色场景下，注册一次、长期复用。
+
+---
+
+## 附录：提速路径三 —— 融合算子 / CPU 往返排查（结论：上游已做，空间极小）
+
+**front_half 融合度**（`VOXCPM_PROFILE_FRONT_HALF=1`）：
+```
+lm_to_dit_proj:  8.477 ms
+res_to_dit_proj: 4.034 ms
+unified_cfm:     7.307 ms
+split_total:    19.818 ms
+fused_front_half: 9.429 ms   ← 融合版
+fused_vs_split_gap: -10.389 ms  ← 已省一半
+```
+decode 三大阶段（正常路径，稳态合计 ~21ms/step）：front_half ~7.5ms + base_step ~10ms + residual_step ~3.5ms。
+
+**CPU↔GPU 往返**（`VOXCPM_LOG_DECODE_TRANSFERS=1`）：
+每步 h2d/d2h 均 0.000–0.009 MiB、0.03–0.36ms，占单步 <2%。无 `tensor_get→vector→tensor_set` 的 PCIe 往返浪费，无 CPU fallback。
+
+**结论**：VoxCPM 上游已经完成最有价值的优化——front_half 融合（省 10ms/步）、全程 GPU 常驻、状态化 graph 缓存、预计算 CFM time table。Pascal 上再手写专用融合算子的收益空间很小且风险高，**不作为提速手段**。
+
+> 注：开启 `VOXCPM_PROFILE_FRONT_HALF` 会因额外跑 split 对照版本把 decode 拖到 ~28 it/s，正常路径是 ~43 it/s，别用 profile 模式的数据当性能。
