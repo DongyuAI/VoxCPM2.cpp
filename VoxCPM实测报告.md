@@ -88,3 +88,26 @@ F:/Tsinglin_Voice/TTS/VoxCPM.cpp/
 ```
 
 > 质量最终以试听为准；此处 ASR 回译是客观辅助指标。建议重点试听 `out_q8.wav`。
+
+---
+
+## 附录：CUDA Graph 移植尝试（结论：失败，不采用）
+
+**背景**：尝试把 Pascal 上被上游 AMPERE 门槛挡住的 CUDA Graph 放行（ggml-cuda.cu 的 `ggml_cuda_graph_set_enabled` 把门槛从 AMPERE 降到 PASCAL），并开 `GGML_CUDA_GRAPHS=ON` 重新编译整个 ggml-cuda。编译成功（sm_61，66/66）。
+
+**A/B 方法**：同一 q8_0 模型、同一文本、同一 6 步；用 `VOXCPM_BENCHMARK_DECODE_STEPS=40 + IGNORE_STOP=1` 固定两边都跑 40 步，排除随机 stop 时机干扰。
+
+**结果（干净对比）**：
+| 指标 | graphOFF | graphON |
+|---|---|---|
+| 稳态 decode | 43.51 it/s | 41.24 it/s（**慢 5%**） |
+| Model inference(40步) | 1.634s | 1.679s |
+| 首步 warmup | 无 | 20 it/s（capture 开销） |
+
+**结论**：不采用。原因分析：
+1. VoxCPM 上游已自带 CPU 侧 graph 缓存（`ensure_unified_cfm_graph` / `ensure_decode_front_half_graph`），已省掉 graph build 开销；CUDA Graph 是另一层，收益重叠。
+2. 每步 kernel 较大（front_half ~7.5ms、base_step ~10ms），kernel launch 开销占比 <1%，graph 削减 launch 几乎无收益。
+3. ggml 的 `ggml_backend_cuda_graph_compute` 主要对单 CUDA backend 生效，而 VoxCPM 走 scheduler 多 backend 路径，replay 收益被抵消。
+4. Pascal 上 graph capture/replay 本身有额外开销。
+
+> 注意：默认 baseline（build-cuda3，graph OFF）才是正式可用版本。build-cudagraph 仅作实验记录。
